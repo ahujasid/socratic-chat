@@ -12,7 +12,7 @@ const philosophers = {
         case 2:
           return `For initial summary: Provide a concise overview of ONLY the inquirer's situation and key points from Act 1. Structure your summary with markdown sections (e.g., "**Summary of the Situation:**"). Focus solely on what was discussed with the inquirer - do not include dialogue with other philosophers or pose new questions. Keep it clear and factual.`;
         case 3:
-          return `Guide the closing of the dialogue: Request final advice from each philosopher, provide a synthesis of key insights, and close the discussion with a final reflection. Use markdown for formatting key points. Keep the summary concise but comprehensive.`;
+          return `Your role is to guide the closing of this dialogue: First, request final perspectives from each philosopher. Then, after all have spoken, provide a concise synthesis (2-3 sentences) of the key insights shared, focusing on practical wisdom that emerged from the discussion.`;
         default:
           return '';
       }
@@ -75,7 +75,7 @@ async function callGPT(message) {
   console.log('Context messages:', message.context);
   console.log('Current Act:', message.act);
   
-  const philosopherPrompt = message.philosopher.name === 'Socrates' 
+  const philosopherPrompt = message.philosopher.getPrompt 
     ? message.philosopher.getPrompt(message.act)
     : message.philosopher.prompt;
     
@@ -262,7 +262,7 @@ export default function SocraticDialogue() {
         philosopher,
         content: currentRound === 0 
           ? "Respond to the philosophical discussion based on the situation Socrates described with your perspective. Don't ask questions." 
-          : "Continue the philosophical discussion, building on the previous points. Don't ask questions. Don't repeat your stance, offer insights. Engage in healthy debate from your perspective, and respond to others in the conversation.",
+          : "Continue the philosophical discussion, building on the previous points. Don't ask questions. Engage in healthy debate from your perspective",
         context: currentContext,
         act: 2,
         onResponse: async (philResponse) => {
@@ -279,11 +279,12 @@ export default function SocraticDialogue() {
             // If this was the last philosopher in the round
             if (philosopher === discussionOrder[discussionOrder.length - 1]) {
               const nextRound = currentRound + 1;
-              if (nextRound < 3) {
+              if (currentRound < 2) {
                 await sleep(1500);
-                await continueDiscussion(currentContext, nextRound);
+                await continueDiscussion(currentContext, currentRound + 1);
               } else {
                 setCurrentAct(3);
+                await handleAct3(currentContext);
               }
             }
           }
@@ -292,8 +293,59 @@ export default function SocraticDialogue() {
     }
   };
 
-  const handleAct3 = async (input, currentContext) => {
-    // Implementation coming in next step
+  const handleAct3 = async (currentContext) => {
+    // System message announcing Act 3
+    addMessage('system', 'Act 3: Final Reflections', 'System');
+    
+    // Socrates requests summaries
+    await messageQueue.add({
+      philosopher: philosophers.socrates,
+      content: "Let each philosopher now share their final perspective on the matter at hand.",
+      context: currentContext,
+      act: 3,
+      onResponse: async (response) => {
+        if (response.choices?.[0]?.message?.content) {
+          addMessage('assistant', response.choices[0].message.content, 'Socrates');
+          
+          // After Socrates speaks, get summaries from each philosopher
+          const philosopherOrder = [
+            philosophers.protagoras,
+            philosophers.thales,
+            philosophers.diogenes
+          ];
+          
+          for (const philosopher of philosopherOrder) {
+            await sleep(1500);
+            await messageQueue.add({
+              philosopher,
+              content: "Provide your final perspective on this matter in 2-3 crisp sentences.",
+              context: currentContext,
+              act: 3,
+              onResponse: (philResponse) => {
+                if (philResponse.choices?.[0]?.message?.content) {
+                  addMessage('assistant', philResponse.choices[0].message.content, philosopher.name);
+                }
+              }
+            });
+          }
+          
+          // After all philosophers have spoken, Socrates provides final synthesis
+          await sleep(1500);
+          await messageQueue.add({
+            philosopher: philosophers.socrates,
+            content: "Provide a final synthesis of the key insights shared.",
+            context: currentContext,
+            act: 3,
+            onResponse: (finalResponse) => {
+              if (finalResponse.choices?.[0]?.message?.content) {
+                addMessage('assistant', finalResponse.choices[0].message.content, 'Socrates');
+                setDialogueComplete(true);
+              }
+            }
+          });
+        }
+      }
+    });
   };
 
   return (
